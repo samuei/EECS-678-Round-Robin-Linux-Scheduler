@@ -1,0 +1,256 @@
+diff -Naur orig/linux-2.6.32.60/arch/x86/include/asm/unistd_32.h project_downloads/linux-2.6.32.60//arch/x86/include/asm/unistd_32.h
+--- orig/linux-2.6.32.60/arch/x86/include/asm/unistd_32.h	2013-03-21 00:34:57.000000000 -0500
++++ project_downloads/linux-2.6.32.60//arch/x86/include/asm/unistd_32.h	2014-04-26 17:12:01.000000000 -0500
+@@ -343,10 +343,11 @@
+ #define __NR_rt_tgsigqueueinfo	335
+ #define __NR_perf_event_open	336
+ #define __NR_sched_other_rr_getquantum	337
++#define __NR_sched_other_rr_setquantum  338
+ 
+ #ifdef __KERNEL__
+ 
+-#define NR_syscalls 338
++#define NR_syscalls 339
+ 
+ #define __ARCH_WANT_IPC_PARSE_VERSION
+ #define __ARCH_WANT_OLD_READDIR
+diff -Naur orig/linux-2.6.32.60/arch/x86/kernel/syscall_table_32.S project_downloads/linux-2.6.32.60//arch/x86/kernel/syscall_table_32.S
+--- orig/linux-2.6.32.60/arch/x86/kernel/syscall_table_32.S	2013-03-21 00:34:57.000000000 -0500
++++ project_downloads/linux-2.6.32.60//arch/x86/kernel/syscall_table_32.S	2014-04-26 17:11:28.000000000 -0500
+@@ -337,3 +337,4 @@
+ 	.long sys_rt_tgsigqueueinfo	/* 335 */
+ 	.long sys_perf_event_open
+ 	.long sys_sched_other_rr_getquantum
++	.long sys_sched_other_rr_setquantum /* 338 */
+\ No newline at end of file
+diff -Naur orig/linux-2.6.32.60/include/linux/syscalls.h project_downloads/linux-2.6.32.60//include/linux/syscalls.h
+--- orig/linux-2.6.32.60/include/linux/syscalls.h	2013-03-21 16:29:12.000000000 -0500
++++ project_downloads/linux-2.6.32.60//include/linux/syscalls.h	2014-04-26 16:28:10.000000000 -0500
+@@ -887,4 +887,6 @@
+ 			unsigned long fd, unsigned long pgoff);
+ 
+ asmlinkage long sys_sched_other_rr_getquantum(void);
++
++asmlinkage long sys_sched_other_rr_setquantum(unsigned int);
+ #endif
+diff -Naur orig/linux-2.6.32.60/kernel/sched.c project_downloads/linux-2.6.32.60//kernel/sched.c
+--- orig/linux-2.6.32.60/kernel/sched.c	2013-03-21 17:33:12.000000000 -0500
++++ project_downloads/linux-2.6.32.60//kernel/sched.c	2014-04-26 17:09:19.000000000 -0500
+@@ -6504,6 +6504,15 @@
+ 	case SCHED_RR:
+ 		p->sched_class = &rt_sched_class;
+ 		break;
++
++		//
++		// Add SCHED_OTHER_RR
++		// and set the policy scheduling class
++		//
++	case SCHED_OTHER_RR:
++      	        p->sched_class = &other_rr_sched_class;
++		printk("SCHED_OTHER_RR policy has been selected\n");
++	        break;
+ 	}
+ 
+ 	p->rt_priority = prio;
+@@ -6550,9 +6559,13 @@
+ 		reset_on_fork = !!(policy & SCHED_RESET_ON_FORK);
+ 		policy &= ~SCHED_RESET_ON_FORK;
+ 
++		//
++		// Add SCHED_OTHER_RR to the list of valid scheduling
++		// policies
++		//
+ 		if (policy != SCHED_FIFO && policy != SCHED_RR &&
+ 		policy != SCHED_NORMAL && policy != SCHED_BATCH &&
+-		policy != SCHED_IDLE)
++		policy != SCHED_IDLE && policy != SCHED_OTHER_RR )
+ 			return -EINVAL;
+ 	}
+ 
+@@ -7216,6 +7229,31 @@
+ 	return other_rr_time_slice;
+ }
+ 
++//
++// System call to set the time quantum for the RR Scheduler
++//
++SYSCALL_DEFINE1(sched_other_rr_setquantum, unsigned int, quantum )
++{
++  char str[100];
++
++  //
++  // Set the time quantum
++  //
++  other_rr_time_slice = quantum;
++
++  //
++  // Print the new time quantum to the log
++  //
++  sprintf (str, "RR Time Quantum set to: %u\n", quantum);
++  printk (str);
++
++  //
++  // Indicate no error, SYSCALL_DEFINE makes the return type
++  // long
++  //
++  return other_rr_time_slice;
++}
++
+ static const char stat_nam[] = TASK_STATE_TO_CHAR_STR;
+ 
+ void sched_show_task(struct task_struct *p)
+diff -Naur orig/linux-2.6.32.60/kernel/sched_other_rr.c project_downloads/linux-2.6.32.60//kernel/sched_other_rr.c
+--- orig/linux-2.6.32.60/kernel/sched_other_rr.c	2013-03-21 16:29:12.000000000 -0500
++++ project_downloads/linux-2.6.32.60//kernel/sched_other_rr.c	2014-04-26 17:49:16.000000000 -0500
+@@ -31,15 +31,37 @@
+  */
+ static void enqueue_task_other_rr(struct rq *rq, struct task_struct *p, int wakeup, bool b)
+ {
+-	// not yet implemented
++  //
++  // Called when a process changes from a sleep state to a runnable state
++  //
++
++  //
++  // for round-robin, just add to end of queue
++  //
++  list_add_tail (&p->other_rr_run_list, &rq->other_rr.queue);
++
++  //
++  // Increment state recording how many tasks are in run queue
++  //
++  rq->other_rr.nr_running++;
+ }
+ 
+ static void dequeue_task_other_rr(struct rq *rq, struct task_struct *p, int sleep)
+ {
+-	// first update the task's runtime statistics
+-	update_curr_other_rr(rq);
+-
+-	// not yet implemented
++  //
++  // update the task's runtime statistics?
++  //
++  update_curr_other_rr (rq);
++
++  //
++  // Remove task from running queue
++  //
++  list_del (&p->other_rr_run_list);
++
++  //
++  // Decrement state recording how many processes are running
++  //
++  rq->other_rr.nr_running--;
+ }
+ 
+ /*
+@@ -48,7 +70,7 @@
+  */
+ static void requeue_task_other_rr(struct rq *rq, struct task_struct *p)
+ {
+-	list_move_tail(&p->other_rr_run_list, &rq->other_rr.queue);
++  list_move_tail (&p->other_rr_run_list, &rq->other_rr.queue);
+ }
+ 
+ /*
+@@ -57,7 +79,7 @@
+ static void
+ yield_task_other_rr(struct rq *rq)
+ {
+-	// not yet implemented
++  requeue_task_other_rr (rq, rq->curr);
+ }
+ 
+ /*
+@@ -66,6 +88,9 @@
+  */
+ static void check_preempt_curr_other_rr(struct rq *rq, struct task_struct *p, int wakeflags)
+ {
++  //
++  // Do nothing
++  //
+ }
+ 
+ /*
+@@ -74,19 +99,31 @@
+ static struct task_struct *pick_next_task_other_rr(struct rq *rq)
+ {
+ 	struct task_struct *next;
+-	struct list_head *queue;
+-	struct other_rr_rq *other_rr_rq;
++	struct list_head *queue = &rq->other_rr.queue;
++	struct other_rr_rq *other_rr_rq = &rq->other_rr;
+ 
+-	// not yet implemented
+-
+-	/* after selecting a task, we need to set a timer to maintain correct
+-	 * runtime statistics. You can uncomment this line after you have
+-	 * written the code to select the appropriate task.
+-	 */
+-	//next->se.exec_start = rq->clock;
+-	
+-	/* you need to return the selected task here */
+-	return NULL;
++	//
++	// Check if the queue is empty, if so return NULL
++	//
++	if( other_rr_rq->nr_running < 1 ) {
++	  return NULL;
++	}
++
++	//
++	// Since RR scheduling, just get the front of the queue
++	// for the next task
++	//
++	next = list_first_entry (queue, struct task_struct, other_rr_run_list);
++
++	//
++	// Set when the process was scheduled
++	//
++	next->se.exec_start = rq->clock;
++
++	//
++	// Return next task
++	//
++	return next;
+ }
+ 
+ static void put_prev_task_other_rr(struct rq *rq, struct task_struct *p)
+@@ -179,7 +216,35 @@
+ 	// first update the task's runtime statistics
+ 	update_curr_other_rr(rq);
+ 
+-	// not yet implemented
++	//
++	// If the time quantum is 0, then
++	// use FCFS scheduling
++	//
++	// Should it even call update_curr_other_rr()?
++	//
++	if( other_rr_time_slice == 0 ) return;
++
++	//
++	// Decrement the task's time slice
++	// and check if it has used all of
++	// its time on the CPU
++	//
++	if( --p->task_time_slice == 0 ) {
++	  //
++	  // reset the time slice
++	  //
++	  p->task_time_slice = other_rr_time_slice;
++
++	  //
++	  // Move the task to the end of the run queue
++	  //
++	  requeue_task_other_rr (rq, p);
++
++	  //
++	  // Tell the schduler that it needs to reschedule
++	  //
++	  set_tsk_need_resched (p);
++	}
+ }
+ 
+ /*
