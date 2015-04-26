@@ -31,15 +31,37 @@ static void update_curr_other_rr(struct rq *rq)
  */
 static void enqueue_task_other_rr(struct rq *rq, struct task_struct *p, int wakeup, bool b)
 {
-	// not yet implemented
+  //
+  // Called when a process changes from a sleep state to a runnable state
+  //
+
+  //
+  // for round-robin, just add to end of queue
+  //
+  list_add_tail (&p->other_rr_run_list, &rq->other_rr.queue);
+
+  //
+  // Increment state recording how many tasks are in run queue
+  //
+  rq->other_rr.nr_running++;
 }
 
 static void dequeue_task_other_rr(struct rq *rq, struct task_struct *p, int sleep)
 {
-	// first update the task's runtime statistics
-	update_curr_other_rr(rq);
+  //
+  // update the task's runtime statistics?
+  //
+  update_curr_other_rr (rq);
 
-	// not yet implemented
+  //
+  // Remove task from running queue
+  //
+  list_del (&p->other_rr_run_list);
+
+  //
+  // Decrement state recording how many processes are running
+  //
+  rq->other_rr.nr_running--;
 }
 
 /*
@@ -48,7 +70,7 @@ static void dequeue_task_other_rr(struct rq *rq, struct task_struct *p, int slee
  */
 static void requeue_task_other_rr(struct rq *rq, struct task_struct *p)
 {
-	list_move_tail(&p->other_rr_run_list, &rq->other_rr.queue);
+  list_move_tail (&p->other_rr_run_list, &rq->other_rr.queue);
 }
 
 /*
@@ -57,7 +79,7 @@ static void requeue_task_other_rr(struct rq *rq, struct task_struct *p)
 static void
 yield_task_other_rr(struct rq *rq)
 {
-	// not yet implemented
+  requeue_task_other_rr (rq, rq->curr);
 }
 
 /*
@@ -66,6 +88,9 @@ yield_task_other_rr(struct rq *rq)
  */
 static void check_preempt_curr_other_rr(struct rq *rq, struct task_struct *p, int wakeflags)
 {
+  //
+  // Do nothing
+  //
 }
 
 /*
@@ -74,19 +99,31 @@ static void check_preempt_curr_other_rr(struct rq *rq, struct task_struct *p, in
 static struct task_struct *pick_next_task_other_rr(struct rq *rq)
 {
 	struct task_struct *next;
-	struct list_head *queue;
-	struct other_rr_rq *other_rr_rq;
+	struct list_head *queue = &rq->other_rr.queue;
+	struct other_rr_rq *other_rr_rq = &rq->other_rr;
 
-	// not yet implemented
+	//
+	// Check if the queue is empty, if so return NULL
+	//
+	if( other_rr_rq->nr_running < 1 ) {
+	  return NULL;
+	}
 
-	/* after selecting a task, we need to set a timer to maintain correct
-	 * runtime statistics. You can uncomment this line after you have
-	 * written the code to select the appropriate task.
-	 */
-	//next->se.exec_start = rq->clock;
-	
-	/* you need to return the selected task here */
-	return NULL;
+	//
+	// Since RR scheduling, just get the front of the queue
+	// for the next task
+	//
+	next = list_first_entry (queue, struct task_struct, other_rr_run_list);
+
+	//
+	// Set when the process was scheduled
+	//
+	next->se.exec_start = rq->clock;
+
+	//
+	// Return next task
+	//
+	return next;
 }
 
 static void put_prev_task_other_rr(struct rq *rq, struct task_struct *p)
@@ -179,7 +216,35 @@ static void task_tick_other_rr(struct rq *rq, struct task_struct *p,int queued)
 	// first update the task's runtime statistics
 	update_curr_other_rr(rq);
 
-	// not yet implemented
+	//
+	// If the time quantum is 0, then
+	// use FCFS scheduling
+	//
+	// Should it even call update_curr_other_rr()?
+	//
+	if( other_rr_time_slice == 0 ) return;
+
+	//
+	// Decrement the task's time slice
+	// and check if it has used all of
+	// its time on the CPU
+	//
+	if( --p->task_time_slice == 0 ) {
+	  //
+	  // reset the time slice
+	  //
+	  p->task_time_slice = other_rr_time_slice;
+
+	  //
+	  // Move the task to the end of the run queue
+	  //
+	  requeue_task_other_rr (rq, p);
+
+	  //
+	  // Tell the schduler that it needs to reschedule
+	  //
+	  set_tsk_need_resched (p);
+	}
 }
 
 /*

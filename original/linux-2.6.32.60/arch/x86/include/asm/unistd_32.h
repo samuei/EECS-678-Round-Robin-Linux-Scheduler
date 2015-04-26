@@ -343,11 +343,10 @@
 #define __NR_rt_tgsigqueueinfo	335
 #define __NR_perf_event_open	336
 #define __NR_sched_other_rr_getquantum	337
-#define __NR_sched_other_rr_setquantum  338
 
 #ifdef __KERNEL__
 
-#define NR_syscalls 339
+#define NR_syscalls 338
 
 #define __ARCH_WANT_IPC_PARSE_VERSION
 #define __ARCH_WANT_OLD_READDIR
