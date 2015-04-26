@@ -888,5 +888,7 @@ asmlinkage long sys_mmap_pgoff(unsigned long addr, unsigned long len,
 
 asmlinkage long sys_sched_other_rr_getquantum(void);
 
+// Added setquantum
+// Nobody's gonna read comments 900 lines into a .h file.
 asmlinkage long sys_sched_other_rr_setquantum(unsigned int);
 #endif
