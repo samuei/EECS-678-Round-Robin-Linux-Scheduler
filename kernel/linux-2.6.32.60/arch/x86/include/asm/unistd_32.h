@@ -343,10 +343,12 @@
 #define __NR_rt_tgsigqueueinfo	335
 #define __NR_perf_event_open	336
 #define __NR_sched_other_rr_getquantum	337
+// Adding the new thing:
 #define __NR_sched_other_rr_setquantum  338
 
 #ifdef __KERNEL__
 
+// If you add something, there are now more of them. Who knew?
 #define NR_syscalls 339
 
 #define __ARCH_WANT_IPC_PARSE_VERSION
