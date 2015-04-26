@@ -6505,10 +6505,7 @@ __setscheduler(struct rq *rq, struct task_struct *p, int policy, int prio)
 		p->sched_class = &rt_sched_class;
 		break;
 
-		//
-		// Add SCHED_OTHER_RR
-		// and set the policy scheduling class
-		//
+	// Add SCHED_OTHER_RR
 	case SCHED_OTHER_RR:
       	        p->sched_class = &other_rr_sched_class;
 		printk("SCHED_OTHER_RR policy has been selected\n");
@@ -6558,11 +6555,7 @@ recheck:
 	} else {
 		reset_on_fork = !!(policy & SCHED_RESET_ON_FORK);
 		policy &= ~SCHED_RESET_ON_FORK;
-
-		//
-		// Add SCHED_OTHER_RR to the list of valid scheduling
-		// policies
-		//
+		// Add SCHED_OTHER_RR again
 		if (policy != SCHED_FIFO && policy != SCHED_RR &&
 		policy != SCHED_NORMAL && policy != SCHED_BATCH &&
 		policy != SCHED_IDLE && policy != SCHED_OTHER_RR )
@@ -7229,28 +7222,15 @@ SYSCALL_DEFINE0(sched_other_rr_getquantum)
 	return other_rr_time_slice;
 }
 
-//
-// System call to set the time quantum for the RR Scheduler
-//
-SYSCALL_DEFINE1(sched_other_rr_setquantum, unsigned int, quantum )
-{
+// Lets us set time quantum
+SYSCALL_DEFINE1(sched_other_rr_setquantum, unsigned int, quantum) {
   char str[100];
-
-  //
-  // Set the time quantum
-  //
   other_rr_time_slice = quantum;
 
-  //
-  // Print the new time quantum to the log
-  //
-  sprintf (str, "RR Time Quantum set to: %u\n", quantum);
-  printk (str);
+  // record-keeping
+  sprintf(str, "RR Time Quantum set to: %u\n", quantum);
+  printk(str);
 
-  //
-  // Indicate no error, SYSCALL_DEFINE makes the return type
-  // long
-  //
   return other_rr_time_slice;
 }
 
