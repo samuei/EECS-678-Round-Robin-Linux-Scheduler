@@ -248,7 +248,7 @@ void parse_arguments(int argc, char *argv[])
       {0,0,0,0}
     };
 
-    c = getopt_long(argc, argv, "hds:p:q", long_options,&option_index);
+    c = getopt_long(argc, argv, "hds:p:q:", long_options,&option_index);
     if (c == -1)
       break;
 
