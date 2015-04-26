@@ -1,0 +1,201 @@
+diff -Naur original/linux-2.6.32.60/arch/x86/include/asm/unistd_32.h kernel/linux-2.6.32.60/arch/x86/include/asm/unistd_32.h
+--- original/linux-2.6.32.60/arch/x86/include/asm/unistd_32.h	2015-04-26 12:13:31.643200387 -0500
++++ kernel/linux-2.6.32.60/arch/x86/include/asm/unistd_32.h	2015-04-26 12:11:42.280592414 -0500
+@@ -343,10 +343,13 @@
+ #define __NR_rt_tgsigqueueinfo	335
+ #define __NR_perf_event_open	336
+ #define __NR_sched_other_rr_getquantum	337
++// Adding the new thing:
++#define __NR_sched_other_rr_setquantum  338
+ 
+ #ifdef __KERNEL__
+ 
+-#define NR_syscalls 338
++// If you add something, there are now more of them. Who knew?
++#define NR_syscalls 339
+ 
+ #define __ARCH_WANT_IPC_PARSE_VERSION
+ #define __ARCH_WANT_OLD_READDIR
+diff -Naur original/linux-2.6.32.60/arch/x86/kernel/syscall_table_32.S kernel/linux-2.6.32.60/arch/x86/kernel/syscall_table_32.S
+--- original/linux-2.6.32.60/arch/x86/kernel/syscall_table_32.S	2015-04-26 12:13:32.515237130 -0500
++++ kernel/linux-2.6.32.60/arch/x86/kernel/syscall_table_32.S	2015-04-26 12:11:43.140628652 -0500
+@@ -337,3 +337,4 @@
+ 	.long sys_rt_tgsigqueueinfo	/* 335 */
+ 	.long sys_perf_event_open
+ 	.long sys_sched_other_rr_getquantum
++	.long sys_sched_other_rr_setquantum /* 338 */
+\ No newline at end of file
+diff -Naur original/linux-2.6.32.60/include/linux/syscalls.h kernel/linux-2.6.32.60/include/linux/syscalls.h
+--- original/linux-2.6.32.60/include/linux/syscalls.h	2015-04-26 12:14:24.514428096 -0500
++++ kernel/linux-2.6.32.60/include/linux/syscalls.h	2015-04-26 12:12:37.266909256 -0500
+@@ -887,4 +887,8 @@
+ 			unsigned long fd, unsigned long pgoff);
+ 
+ asmlinkage long sys_sched_other_rr_getquantum(void);
++
++// Added setquantum
++// Nobody's gonna read comments 900 lines into a .h file.
++asmlinkage long sys_sched_other_rr_setquantum(unsigned int);
+ #endif
+diff -Naur original/linux-2.6.32.60/kernel/sched.c kernel/linux-2.6.32.60/kernel/sched.c
+--- original/linux-2.6.32.60/kernel/sched.c	2015-04-26 12:14:28.586599676 -0500
++++ kernel/linux-2.6.32.60/kernel/sched.c	2015-04-26 12:12:40.120029473 -0500
+@@ -6504,6 +6504,12 @@
+ 	case SCHED_RR:
+ 		p->sched_class = &rt_sched_class;
+ 		break;
++
++	// Add SCHED_OTHER_RR
++	case SCHED_OTHER_RR:
++      	        p->sched_class = &other_rr_sched_class;
++		printk("SCHED_OTHER_RR policy has been selected\n");
++	        break;
+ 	}
+ 
+ 	p->rt_priority = prio;
+@@ -6549,10 +6555,10 @@
+ 	} else {
+ 		reset_on_fork = !!(policy & SCHED_RESET_ON_FORK);
+ 		policy &= ~SCHED_RESET_ON_FORK;
+-
++		// Add SCHED_OTHER_RR again
+ 		if (policy != SCHED_FIFO && policy != SCHED_RR &&
+ 		policy != SCHED_NORMAL && policy != SCHED_BATCH &&
+-		policy != SCHED_IDLE)
++		policy != SCHED_IDLE && policy != SCHED_OTHER_RR )
+ 			return -EINVAL;
+ 	}
+ 
+@@ -7216,6 +7222,18 @@
+ 	return other_rr_time_slice;
+ }
+ 
++// Lets us set time quantum
++SYSCALL_DEFINE1(sched_other_rr_setquantum, unsigned int, quantum) {
++  char str[100];
++  other_rr_time_slice = quantum;
++
++  // record-keeping
++  sprintf(str, "RR Time Quantum set to: %u\n", quantum);
++  printk(str);
++
++  return other_rr_time_slice;
++}
++
+ static const char stat_nam[] = TASK_STATE_TO_CHAR_STR;
+ 
+ void sched_show_task(struct task_struct *p)
+diff -Naur original/linux-2.6.32.60/kernel/sched_other_rr.c kernel/linux-2.6.32.60/kernel/sched_other_rr.c
+--- original/linux-2.6.32.60/kernel/sched_other_rr.c	2015-04-26 12:14:28.611600728 -0500
++++ kernel/linux-2.6.32.60/kernel/sched_other_rr.c	2015-04-26 12:12:40.146030567 -0500
+@@ -31,15 +31,20 @@
+  */
+ static void enqueue_task_other_rr(struct rq *rq, struct task_struct *p, int wakeup, bool b)
+ {
+-	// not yet implemented
++  // On process waking, if RR, put it on the end of the queue.
++  list_add_tail (&p->other_rr_run_list, &rq->other_rr.queue);
++
++  // Update task list
++  rq->other_rr.nr_running++;
+ }
+ 
+ static void dequeue_task_other_rr(struct rq *rq, struct task_struct *p, int sleep)
+ {
+-	// first update the task's runtime statistics
+-	update_curr_other_rr(rq);
+-
+-	// not yet implemented
++  // first update the task's runtime statistics
++  update_curr_other_rr (rq);
++  // Remove from running queue and update task list
++  list_del (&p->other_rr_run_list);
++  rq->other_rr.nr_running--;
+ }
+ 
+ /*
+@@ -48,7 +53,8 @@
+  */
+ static void requeue_task_other_rr(struct rq *rq, struct task_struct *p)
+ {
+-	list_move_tail(&p->other_rr_run_list, &rq->other_rr.queue);
++	// wag your tail
++  	list_move_tail (&p->other_rr_run_list, &rq->other_rr.queue);
+ }
+ 
+ /*
+@@ -57,7 +63,7 @@
+ static void
+ yield_task_other_rr(struct rq *rq)
+ {
+-	// not yet implemented
++  requeue_task_other_rr (rq, rq->curr);
+ }
+ 
+ /*
+@@ -66,6 +72,7 @@
+  */
+ static void check_preempt_curr_other_rr(struct rq *rq, struct task_struct *p, int wakeflags)
+ {
++  // Pretty sure we shouldn't do anything here. Rethink that if stuff doesn't work later.
+ }
+ 
+ /*
+@@ -74,19 +81,22 @@
+ static struct task_struct *pick_next_task_other_rr(struct rq *rq)
+ {
+ 	struct task_struct *next;
+-	struct list_head *queue;
+-	struct other_rr_rq *other_rr_rq;
++	struct list_head *queue = &rq->other_rr.queue;
++	struct other_rr_rq *other_rr_rq = &rq->other_rr;
+ 
+-	// not yet implemented
++	// Return NULL if queue is empty
++	if( other_rr_rq->nr_running < 1 ) {
++	  return NULL;
++	}
++	next = list_first_entry (queue, struct task_struct, other_rr_run_list);
+ 
+ 	/* after selecting a task, we need to set a timer to maintain correct
+-	 * runtime statistics. You can uncomment this line after you have
+-	 * written the code to select the appropriate task.
+-	 */
+-	//next->se.exec_start = rq->clock;
+-	
+-	/* you need to return the selected task here */
+-	return NULL;
++-	 * runtime statistics. You can uncomment this line after you have
++-	 * written the code to select the appropriate task.
++-	 */
++	next->se.exec_start = rq->clock;
++
++	return next;
+ }
+ 
+ static void put_prev_task_other_rr(struct rq *rq, struct task_struct *p)
+@@ -176,10 +186,22 @@
+  */
+ static void task_tick_other_rr(struct rq *rq, struct task_struct *p,int queued)
+ {
+-	// first update the task's runtime statistics
++	// Update task's runtime stats
+ 	update_curr_other_rr(rq);
+ 
+-	// not yet implemented
++	// If quantum's 0, use FCFS
++	if( other_rr_time_slice == 0 ) return;
++
++	// Check if it's used all its time
++	if( --p->task_time_slice == 0 ) {
++	  // reset time
++	  p->task_time_slice = other_rr_time_slice;
++	  // Move task to end of run queue
++	  requeue_task_other_rr (rq, p);
++
++	  //reschedule
++	  set_tsk_need_resched (p);
++	}
+ }
+ 
+ /*
